@@ -1,0 +1,91 @@
+language: cpp
+sudo: false
+
+#cache:
+#  apt: true
+#  directories:
+#    - $HOME/.cache/cuda
+#    - $HOME/.cache/cmake
+#    - $HOME/.cache/boost
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+      - llvm-toolchain-precise-3.5
+    packages:
+      - g++-4.9
+#      - clang-3.5
+
+env:
+  global:
+    - CUDA_ROOT: $HOME/.cache/cuda
+    - CMAKE_ROOT: $HOME/.cache/cmake
+    - BOOST_ROOT: $HOME/.cache/boost
+    - BOOST_VER: 105600 # careful: hard coded below
+  matrix:
+    - BOOST_VERSION=1.56.0
+      #CUDA_VERSION=7.5
+      #BOOST_APPLY_FIXES=ON
+      #CXX_STANDARD=11
+
+before_install:
+  - export PATH=$CUDA_ROOT/bin:$PATH
+  - echo "$CXX $CC $CXX_STANDARD Fixes:$BOOST_APPLY_FIXES"
+  - $CXX --version
+  - $CC --version
+
+install:
+  #############################################################################
+  # CMAKE                                                                     #
+  #############################################################################
+  - export PATH=$CMAKE_ROOT/bin:$PATH
+  - CMAKE_33_FOUND=$(cmake --version | grep " 3\.3\." >/dev/null && { echo 0; } || { echo 1; })
+  - if [ $CMAKE_33_FOUND -ne 0 ]; then
+      mkdir -p $CMAKE_ROOT &&
+      cd $CMAKE_ROOT &&
+      travis_retry wget --no-check-certificate http://www.cmake.org/files/v3.3/cmake-3.3.2-Linux-x86_64.tar.gz &&
+      tar -xzf cmake-3.3.2-Linux-x86_64.tar.gz &&
+      mv cmake-3.3.2-Linux-x86_64/* . &&
+      rm -rf cmake-3.3.2-Linux-x86_64.tar.gz cmake-3.3.2-Linux-x86_64 &&
+      cd -;
+    fi
+  - cmake --version
+  #############################################################################
+  # BOOST                                                                     #
+  #############################################################################
+  - export CMAKE_PREFIX_PATH=$BOOST_ROOT:$CMAKE_PREFIX_PATH
+  # cmake --find-package -DNAME=Boost -DCOMPILER_ID=GNU -DLANGUAGE=CXX -DMODE=EXIST
+  - echo -e "#include <boost/version.hpp>\n#include <iostream>\nint main() { std::cout << BOOST_VERSION << std::endl; return 0; }"
+        | $CXX -I$BOOST_ROOT/include -x c++ - >/dev/null || { echo 0; }
+  - ls $BOOST_ROOT
+  - BOOST_FOUND=$([ $(./a.out) -eq $BOOST_VER ] && { echo 0; } || { echo 1; })
+  - if [ $BOOST_FOUND -ne 0 ]; then
+      mkdir -p $ BOOST_ROOT &&
+      cd $BOOST_ROOT &&
+      travis_retry git clone --branch tags/boost-$BOOST_VERSION --depth 1 --recursive -j git@github.com:boostorg/boost.git src &&
+      cd src &&
+      ./bootstrap.sh --with-libraries=atomic,chrono,context,date_time,system,thread --prefix=$BOOST_ROOT &&
+      ./b2 -j2 &&
+      ./b2 install &&
+      rm -rf src &&
+      cd $HOME;
+    fi
+  #############################################################################
+  # CUDA                                                                      #
+  #############################################################################
+  - NVCC_FOUND=$(which nvcc >/dev/null && { echo 0; } || { echo 1; })
+  - if [ $NVCC_FOUND -ne 0 ] && [ $COMPILER == "nvcc" ]; then
+      mkdir -p $CUDA_ROOT &&
+      cd $CUDA_ROOT &&
+      travis_retry wget http://developer.download.nvidia.com/compute/cuda/7.5/Prod/local_installers/cuda_7.5.18_linux.run &&
+      chmod u+x *.run &&
+      ./cuda_7.5.18_linux.run --silent --verbose --toolkit --toolkitpath=$CUDA_ROOT &&
+      rm -rf cuda_7.5.18_linux.run $CUDA_ROOT/{samples,jre,doc,share} &&
+      cd -;
+    fi
+
+script:
+  - mdkir testExample && cd testExample
+  - cmake $TRAVIS_BUILD_DIR/ # $CMAKE_FLAGS
+  - make
